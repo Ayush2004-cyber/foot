@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FootMeasure AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+            background-color: #030712; /* bg-gray-950 */
+
+            color: #f9fafb; /* text-gray-50 */
+        }
+        #camera-feed {
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 0;
+            /* transform: scaleX(-1); Removed mirroring for rear camera, which is more natural for measurement */
+        }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0) 20%, rgba(0,0,0,0) 80%, rgba(0,0,0,0.6) 100%);
+        }
+        .foot-detection-box {
+            position: absolute;
+            border: 2px dashed #3b82f6; /* blue-500 */
+            border-radius: 0.5rem;
+            /* Adjust size and position to better frame a foot, assuming landscape or portrait with foot at bottom */
+            width: 80%; /* Wider to accommodate foot */
+            height: 50%; /* Taller */
+            bottom: 10%; /* Closer to the bottom for foot placement */
+            left: 10%;
+            display: none;
+            pointer-events: none;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+            transform: translateY(0); /* Ensure no unintended transforms */
+            transition: all 0.5s ease-in-out; /* Smooth transition for appearance */
+        }
+        .instruction-box {
+            background-color: rgba(17, 24, 39, 0.9); /* bg-gray-900 with transparency */
+            border: 1px solid #1f2937; /* border-gray-800 */
+            border-radius: 0.75rem; /* rounded-lg */
+            padding: 1rem 1.5rem;
+            text-align: center;
+            max-width: 90%;
+            margin-top: 2rem;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            transition: all 0.3s ease-in-out;
+        }
+        .measurement-display {
+            background-color: rgba(17, 24, 39, 0.9);
+            border: 1px solid #1f2937;
+            border-radius: 0.75rem;
+            padding: 1rem 1.5rem;
+            text-align: center;
+            max-width: 90%;
+            margin-bottom: 2rem;
+            box-shadow: 0 -4px 10px rgba(0,0,0,0.3);
+            transition: all 0.3s ease-in-out;
+        }
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.375rem; /* rounded-md */
+            font-weight: 600; /* font-semibold */
+            transition: background-color 0.2s ease-in-out, transform 0.1s ease-in-out;
+            cursor: pointer;
+            width: 100%; /* Make buttons full width for mobile */
+            font-size: 1.1rem; /* Slightly larger text */
+        }
+        .btn:active {
+            transform: translateY(1px);
+        }
+        .btn-primary {
+            background-color: #f9fafb; /* bg-gray-50 */
+            color: #111827; /* text-gray-900 */
+            border: 1px solid #f9fafb;
+        }
+        .btn-primary:hover {
+            background-color: #e5e7eb; /* hover:bg-gray-200 */
+        }
+        .btn-secondary {
+            background-color: #1f2937; /* bg-gray-800 */
+            color: #f9fafb; /* text-gray-50 */
+            border: 1px solid #374151; /* border-gray-700 */
+        }
+        .btn-secondary:hover {
+            background-color: #374151; /* hover:bg-gray-700 */
+        }
+        .unit-toggle-btn {
+            background-color: #1f2937;
+            color: #f9fafb;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            border: 1px solid #374151;
+            transition: all 0.2s ease-in-out;
+        }
+        .unit-toggle-btn.active {
+            background-color: #3b82f6; /* bg-blue-500 */
+            border-color: #3b82f6;
+            font-weight: bold;
+        }
+        .history-panel {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #030712;
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+            transform: translateX(100%);
+            transition: transform 0.3s ease-in-out;
+        }
+        .history-panel.open {
+            transform: translateX(0);
+        }
+        .history-item {
+            background-color: #111827; /* bg-gray-900 */
+            border: 1px solid #1f2937; /* border-gray-800 */
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+        .foot-detection-box.pulsing {
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <video id="camera-feed" autoplay playsinline></video>
+
+    <div id="overlay">
+        <!-- Top Section: Instructions -->
+        <div id="instruction-container" class="instruction-box">
+            <h2 id="instruction-title" class="text-xl font-semibold text-gray-50 mb-2">Welcome to FootMeasure AI</h2>
+            <p id="instruction-text" class="text-gray-400 text-sm">
+                Tap 'Start Measurement' to begin.
+                <br><strong class="text-red-400">Note: This is a simulation. Accurate real-world measurement requires native app development with AR/Computer Vision.</strong>
+            </p>
+        </div>
+
+        <!-- Middle Section: Foot Detection Box (Simulated) -->
+        <div id="foot-detection-box" class="foot-detection-box"></div>
+
+        <!-- Bottom Section: Controls & Measurement Display -->
+        <div id="bottom-controls" class="w-full flex flex-col items-center space-y-4">
+            <div id="measurement-display" class="measurement-display hidden">
+                <p class="text-xl text-gray-400">Length: <span id="foot-length" class="text-blue-400 font-bold">--</span></p>
+                <p class="text-xl text-gray-400">Width: <span id="foot-width" class="text-blue-400 font-bold">--</span></p>
+                <div class="mt-3 flex justify-center space-x-2">
+                    <button id="unit-toggle-cm" class="unit-toggle-btn active">CM</button>
+                    <button id="unit-toggle-in" class="unit-toggle-btn">IN</button>
+                </div>
+            </div>
+
+            <div id="action-buttons" class="flex flex-col space-y-3 w-full max-w-xs">
+                <button id="start-button" class="btn btn-primary">Start Measurement</button>
+                <button id="detect-button" class="btn btn-primary hidden">Detect Foot</button>
+                <button id="calibrate-button" class="btn btn-primary hidden">Calibrate Foot</button>
+                <button id="measure-button" class="btn btn-primary hidden">Measure Foot</button>
+                <button id="save-button" class="btn btn-secondary hidden">Save Measurement</button>
+                <button id="share-button" class="btn btn-secondary hidden">Share Measurement</button>
+                <button id="history-button" class="btn btn-secondary">View History</button>
+                <button id="reset-button" class="btn btn-secondary hidden">Restart</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- History Panel -->
+    <div id="history-panel" class="history-panel">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-2xl font-bold text-gray-50">Measurement History</h2>
+            <button id="close-history-button" class="btn btn-secondary">Close</button>
+        </div>
+        <div id="history-list" class="flex-grow overflow-y-auto space-y-2">
+            <!-- History items will be injected here -->
+            <p id="no-history-message" class="text-gray-400 text-center mt-8">No measurements saved yet.</p>
+        </div>
+        <button id="clear-history-button" class="btn btn-secondary mt-4">Clear History</button>
+    </div>
+
+    <script>
+        const cameraFeed = document.getElementById('camera-feed');
+        const overlay = document.getElementById('overlay');
+        const instructionTitle = document.getElementById('instruction-title');
+        const instructionText = document.getElementById('instruction-text');
+        const footDetectionBox = document.getElementById('foot-detection-box');
+        const measurementDisplay = document.getElementById('measurement-display');
+        const footLengthSpan = document.getElementById('foot-length');
+        const footWidthSpan = document.getElementById('foot-width');
+        const unitToggleCm = document.getElementById('unit-toggle-cm');
+        const unitToggleIn = document.getElementById('unit-toggle-in');
+
+        const startButton = document.getElementById('start-button');
+        const detectButton = document.getElementById('detect-button');
+        const calibrateButton = document.getElementById('calibrate-button');
+        const measureButton = document.getElementById('measure-button');
+        const saveButton = document.getElementById('save-button');
+        const shareButton = document.getElementById('share-button');
+        const historyButton = document.getElementById('history-button');
+        const resetButton = document.getElementById('reset-button');
+
+        const historyPanel = document.getElementById('history-panel');
+        const historyList = document.getElementById('history-list');
+        const noHistoryMessage = document.getElementById('no-history-message');
+        const closeHistoryButton = document.getElementById('close-history-button');
+        const clearHistoryButton = document.getElementById('clear-history-button');
+
+        let currentUnit = 'cm'; // 'cm' or 'in'
+        let currentLengthCm = 0;
+        let currentWidthCm = 0;
+
+        const APP_STATES = {
+            INITIAL: 'initial',
+            CAMERA_ACTIVE: 'camera_active',
+            FOOT_DETECTED: 'foot_detected',
+            CALIBRATING: 'calibrating',
+            MEASURING: 'measuring',
+            RESULTS: 'results',
+            HISTORY: 'history'
+        };
+        let appState = APP_STATES.INITIAL;
+
+        // --- Utility Functions ---
+        function showElement(el) { el.classList.remove('hidden'); }
+        function hideElement(el) { el.classList.add('hidden'); }
+
+        function updateUIForState() {
+            // Hide all specific action buttons by default
+            hideElement(startButton);
+            hideElement(detectButton);
+            hideElement(calibrateButton);
+            hideElement(measureButton);
+            hideElement(saveButton);
+            hideElement(shareButton);
+            hideElement(resetButton);
+            hideElement(footDetectionBox);
+            hideElement(measurementDisplay);
+            hideElement(historyPanel);
+            showElement(overlay); // Ensure main overlay is visible
+
+            // Remove pulsing animation initially
+            footDetectionBox.classList.remove('pulsing');
+
+            switch (appState) {
+                case APP_STATES.INITIAL:
+                    instructionTitle.textContent = "Welcome to FootMeasure AI";
+                    instructionText.innerHTML = `Tap 'Start Measurement' to begin.
+                        <br><strong class="text-red-400">Note: This is a simulation. Accurate real-world measurement requires native app development with AR/Computer Vision.</strong>`;
+                    showElement(startButton);
+                    showElement(historyButton); // History button always available
+                    break;
+                case APP_STATES.CAMERA_ACTIVE:
+                    instructionTitle.textContent = "Step 1: Position Your Foot";
+                    instructionText.textContent = "Place your foot on a flat, contrasting surface. Ensure your entire foot is clearly visible and within the dashed box.";
+                    showElement(footDetectionBox); // Show box as a guide
+                    showElement(detectButton);
+                    break;
+                case APP_STATES.FOOT_DETECTED:
+                    instructionTitle.textContent = "Step 2: Foot Detected! Ready for Calibration";
+                    instructionText.textContent = "Hold still. For real accuracy, a known-size reference (like a credit card) would be placed next to your foot. (Simulated)";
+                    showElement(footDetectionBox);
+                    footDetectionBox.classList.add('pulsing'); // Add pulsing to indicate readiness
+                    showElement(calibrateButton);
+                    break;
+                case APP_STATES.CALIBRATING:
+                    instructionTitle.textContent = "Calibrating...";
+                    instructionText.textContent = "Analyzing angles and scale. Please keep your device steady.";
+                    showElement(footDetectionBox);
+                    footDetectionBox.classList.add('pulsing'); // Keep pulsing during calibration simulation
+                    break;
+                case APP_STATES.MEASURING:
+                    instructionTitle.textContent = "Measuring...";
+                    instructionText.textContent = "Identifying extreme points (heel to longest toe) and calculating dimensions.";
+                    showElement(footDetectionBox);
+                    footDetectionBox.classList.add('pulsing'); // Keep pulsing during measurement simulation
+                    break;
+                case APP_STATES.RESULTS:
+                    instructionTitle.textContent = "Measurement Complete!";
+                    instructionText.textContent = "Here are your simulated foot measurements. Remember, for real accuracy, a native app is needed.";
+                    hideElement(footDetectionBox); // Hide box after measurement
+                    showElement(measurementDisplay);
+                    showElement(saveButton);
+                    showElement(shareButton);
+                    showElement(resetButton);
+                    showElement(historyButton); // History button available after results
+                    break;
+                case APP_STATES.HISTORY:
+                    hideElement(overlay); // Hide the main camera overlay
+                    showElement(historyPanel);
+                    loadHistory();
+                    // Stop camera feed if it was active when entering history
+                    if (cameraFeed.srcObject) {
+                        cameraFeed.srcObject.getTracks().forEach(track => track.stop());
+                        cameraFeed.srcObject = null;
+                    }
+                    break;
+            }
+        }
+
+        function updateMeasurementDisplay() {
+            if (currentUnit === 'cm') {
+                footLengthSpan.textContent = `${currentLengthCm.toFixed(1)} cm`;
+                footWidthSpan.textContent = `${currentWidthCm.toFixed(1)} cm`;
+                unitToggleCm.classList.add('active');
+                unitToggleIn.classList.remove('active');
+            } else {
+                const lengthIn = currentLengthCm / 2.54;
+                const widthIn = currentWidthCm / 2.54;
+                footLengthSpan.textContent = `${lengthIn.toFixed(1)} in`;
+                footWidthSpan.textContent = `${widthIn.toFixed(1)} in`;
+                unitToggleCm.classList.remove('active');
+                unitToggleIn.classList.add('active');
+            }
+        }
+
+        // --- Event Handlers ---
+        startButton.addEventListener('click', async () => {
+            try {
+                // Request rear camera for 'environment' facing mode
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                cameraFeed.srcObject = stream;
+                cameraFeed.play();
+                appState = APP_STATES.CAMERA_ACTIVE;
+                updateUIForState();
+            } catch (err) {
+                console.error("Error accessing camera: ", err);
+                instructionTitle.textContent = "Camera Access Denied!";
+                instructionText.innerHTML = "Please allow camera access to use this feature. <br> <strong class='text-yellow-400'>Make sure you are on a device with a camera and grant permissions.</strong>";
+                hideElement(startButton); // Hide start button if no camera
+                showElement(resetButton); // Offer a reset if failed
+            }
+        });
+
+        detectButton.addEventListener('click', () => {
+            instructionTitle.textContent = "Detecting Foot...";
+            instructionText.textContent = "Simulating object detection. Please keep your foot steady in the box.";
+            hideElement(detectButton);
+            // Simulate AI detection
+            setTimeout(() => {
+                // In a real app, this is where actual CV/ML model would run
+                // and determine if a foot is present and properly angled.
+                appState = APP_STATES.FOOT_DETECTED;
+                updateUIForState();
+            }, 2000); // Simulate detection time
+        });
+
+        calibrateButton.addEventListener('click', () => {
+            appState = APP_STATES.CALIBRATING;
+            updateUIForState();
+            hideElement(calibrateButton);
+            // Simulate calibration and then measurement
+            setTimeout(() => {
+                // In a real app, ARKit/ARCore would use features points
+                // and potentially a reference object to establish scale.
+                appState = APP_STATES.MEASURING;
+                updateUIForState();
+                setTimeout(() => {
+                    // Simulate measurement with realistic foot sizes
+                    currentLengthCm = parseFloat((Math.random() * (28 - 22) + 22).toFixed(1)); // 22-28 cm
+                    currentWidthCm = parseFloat((Math.random() * (11 - 9) + 9).toFixed(1));   // 9-11 cm
+                    appState = APP_STATES.RESULTS;
+                    updateMeasurementDisplay();
+                    updateUIForState();
+                }, 2500); // Simulate measurement time
+            }, 2000); // Simulate calibration time
+        });
+
+        unitToggleCm.addEventListener('click', () => {
+            currentUnit = 'cm';
+            updateMeasurementDisplay();
+        });
+
+        unitToggleIn.addEventListener('click', () => {
+            currentUnit = 'in';
+            updateMeasurementDisplay();
+        });
+
+        saveButton.addEventListener('click', () => {
+            const measurements = JSON.parse(localStorage.getItem('footMeasurements') || '[]');
+            const timestamp = new Date().toLocaleString();
+            measurements.push({
+                lengthCm: currentLengthCm.toFixed(1),
+                widthCm: currentWidthCm.toFixed(1),
+                timestamp: timestamp
+            });
+            localStorage.setItem('footMeasurements', JSON.stringify(measurements));
+            alert('Measurement saved to history!');
+            // No need to loadHistory here, it's loaded when history panel is opened
+        });
+
+        shareButton.addEventListener('click', () => {
+            const shareText = `My simulated foot size is ${footLengthSpan.textContent} long and ${footWidthSpan.textContent} wide! Measured with FootMeasure AI.`;
+            // Check if Web Share API is available (for native sharing dialog)
+            if (navigator.share) {
+                navigator.share({
+                    title: 'FootMeasure AI Measurement',
+                    text: shareText,
+                }).catch((error) => console.error('Error sharing:', error));
+            } else {
+                // Fallback for browsers that don't support Web Share API
+                prompt("Copy this to share:", shareText);
+            }
+        });
+
+        historyButton.addEventListener('click', () => {
+            appState = APP_STATES.HISTORY;
+            updateUIForState();
+        });
+
+        closeHistoryButton.addEventListener('click', () => {
+            appState = APP_STATES.INITIAL; // Go back to initial state
+            updateUIForState();
+        });
+
+        clearHistoryButton.addEventListener('click', () => {
+            if (confirm('Are you sure you want to clear all measurement history?')) {
+                localStorage.removeItem('footMeasurements');
+                loadHistory(); // Refresh history list
+            }
+        });
+
+        resetButton.addEventListener('click', () => {
+            appState = APP_STATES.INITIAL;
+            updateUIForState();
+            // Stop camera feed and clear source
+            if (cameraFeed.srcObject) {
+                cameraFeed.srcObject.getTracks().forEach(track => track.stop());
+                cameraFeed.srcObject = null;
+            }
+        });
+
+        function loadHistory() {
+            const measurements = JSON.parse(localStorage.getItem('footMeasurements') || '[]');
+            historyList.innerHTML = ''; // Clear existing list
+
+            if (measurements.length === 0) {
+                showElement(noHistoryMessage);
+            } else {
+                hideElement(noHistoryMessage);
+                // Sort by timestamp if desired, or just display as added
+                measurements.reverse().forEach((m, index) => { // Display newest first
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    item.innerHTML = `
+                        <div>
+                            <p class="text-gray-50 font-medium">Measurement ${measurements.length - index}</p>
+                            <p class="text-gray-400 text-sm">Length: ${m.lengthCm} cm / Width: ${m.widthCm} cm</p>
+                            <p class="text-gray-500 text-xs">${m.timestamp}</p>
+                        </div>
+                    `;
+                    historyList.appendChild(item);
+                });
+            }
+        }
+
+        // Initial UI setup on page load
+        updateUIForState();
+    </script>
+</body>
+</html>
